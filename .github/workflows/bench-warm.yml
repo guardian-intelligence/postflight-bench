@@ -1,0 +1,78 @@
+name: bench-warm
+run-name: "warm: ${{ inputs.lane }} (${{ inputs.rep }})"
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: warm lane
+        required: true
+        type: choice
+        options: [gh-warm, blacksmith-warm, postflight-warm]
+      rep:
+        description: repetition tag
+        required: false
+        default: r1
+permissions:
+  contents: read
+env:
+  NODE_OPTIONS: --max-old-space-size=12288
+  YARN_ENABLE_GLOBAL_CACHE: "false"
+  CAL_SHA: f00434927386c9ecdcbd7e6c5f82d22044a245bc
+jobs:
+  bench:
+    runs-on: ${{ inputs.lane == 'gh-warm' && 'ubuntu-latest' || inputs.lane == 'blacksmith-warm' && 'blacksmith-4vcpu-ubuntu-2404' || fromJSON('["self-hosted","postflight-warm"]') }}
+    timeout-minutes: 90
+    steps:
+      - name: Machine info
+        run: |
+          nproc; grep -m1 "model name" /proc/cpuinfo; free -h | head -2
+      - name: Mount workspace (sticky disk)
+        if: inputs.lane == 'blacksmith-warm'
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: guardian-intelligence-calws
+          path: /home/runner/ws
+      - name: Mount workspace (zvol)
+        if: inputs.lane == 'postflight-warm'
+        run: |
+          sudo mkdir -p $HOME/ws
+          sudo mount /dev/disk/by-id/virtio-calws $HOME/ws || { sudo mkfs.ext4 -q /dev/disk/by-id/virtio-calws && sudo mount /dev/disk/by-id/virtio-calws $HOME/ws; }
+          sudo chown $(id -u):$(id -g) $HOME/ws
+      - name: Workspace dir (gh)
+        if: inputs.lane == 'gh-warm'
+        run: mkdir -p $HOME/ws
+      - name: Sync repo (warm-aware)
+        run: |
+          cd $HOME/ws
+          if [ -d cal.com/.git ]; then
+            echo "WARM workspace detected"
+            cd cal.com
+            git fetch --depth 1 origin $CAL_SHA || git fetch --depth 1 https://github.com/calcom/cal.com.git $CAL_SHA
+            git checkout -f FETCH_HEAD
+          else
+            echo "COLD workspace — seeding"
+            git init cal.com && cd cal.com
+            git remote add origin https://github.com/calcom/cal.com.git
+            git fetch --depth 1 origin $CAL_SHA
+            git checkout FETCH_HEAD
+          fi
+      - name: Restore caches (gh actions/cache)
+        if: inputs.lane == 'gh-warm'
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/ws/cal.com/node_modules
+            /home/runner/ws/cal.com/.yarn/cache
+            /home/runner/ws/cal.com/node_modules/.cache
+          key: calws-v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: cd $HOME/ws/cal.com && corepack enable && yarn install --immutable
+      - name: Prisma generate
+        run: cd $HOME/ws/cal.com && yarn prisma generate
+      - name: Type check
+        run: cd $HOME/ws/cal.com && yarn type-check:ci
+      - name: Unit tests
+        run: cd $HOME/ws/cal.com && yarn test -- --no-isolate
