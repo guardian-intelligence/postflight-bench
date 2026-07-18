@@ -1,0 +1,49 @@
+name: bench
+run-name: "bench: ${{ inputs.lane }} (${{ inputs.rep }})"
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: runner lane
+        required: true
+        type: choice
+        options: [gh-hosted, postflight-ht4, postflight-core4]
+      rep:
+        description: repetition tag
+        required: false
+        default: r1
+permissions:
+  contents: read
+env:
+  NODE_OPTIONS: --max-old-space-size=12288
+jobs:
+  bench:
+    runs-on: ${{ inputs.lane == 'gh-hosted' && 'ubuntu-latest' || fromJSON(format('["self-hosted","{0}"]', inputs.lane)) }}
+    timeout-minutes: 90
+    steps:
+      - name: Machine info
+        run: |
+          nproc; grep -m1 "model name" /proc/cpuinfo; free -h | head -2; df -h . | tail -1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Clone cal.com (pinned)
+        run: |
+          git init cal.com && cd cal.com
+          git remote add origin https://github.com/calcom/cal.com.git
+          git fetch --depth 1 origin f00434927386c9ecdcbd7e6c5f82d22044a245bc
+          git checkout FETCH_HEAD
+      - name: Install dependencies (cold)
+        working-directory: cal.com
+        run: |
+          corepack enable
+          yarn install --immutable
+      - name: Prisma generate
+        working-directory: cal.com
+        run: yarn prisma generate
+      - name: Type check
+        working-directory: cal.com
+        run: yarn type-check:ci
+      - name: Unit tests
+        working-directory: cal.com
+        run: yarn test -- --no-isolate
