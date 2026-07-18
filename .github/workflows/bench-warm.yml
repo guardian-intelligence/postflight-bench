@@ -7,7 +7,7 @@ on:
         description: warm lane
         required: true
         type: choice
-        options: [gh-warm, blacksmith-warm, postflight-warm]
+        options: [gh-warm, blacksmith-warm, postflight-warm, postflight-warm-luks]
       rep:
         description: repetition tag
         required: false
@@ -20,7 +20,7 @@ env:
   CAL_SHA: f00434927386c9ecdcbd7e6c5f82d22044a245bc
 jobs:
   bench:
-    runs-on: ${{ inputs.lane == 'gh-warm' && 'ubuntu-latest' || inputs.lane == 'blacksmith-warm' && 'blacksmith-4vcpu-ubuntu-2404' || fromJSON('["self-hosted","postflight-warm"]') }}
+    runs-on: ${{ inputs.lane == 'gh-warm' && 'ubuntu-latest' || inputs.lane == 'blacksmith-warm' && 'blacksmith-4vcpu-ubuntu-2404' || inputs.lane == 'postflight-warm-luks' && fromJSON('["self-hosted","postflight-warm-luks"]') || fromJSON('["self-hosted","postflight-warm"]') }}
     timeout-minutes: 90
     steps:
       - name: Machine info
@@ -32,6 +32,17 @@ jobs:
         with:
           key: guardian-intelligence-calws
           path: /home/runner/ws
+      - name: Mount workspace (zvol+LUKS)
+        if: inputs.lane == 'postflight-warm-luks'
+        run: |
+          sudo cryptsetup open /dev/disk/by-id/virtio-calws calws --key-file /opt/luks.key || {
+            sudo cryptsetup luksFormat /dev/disk/by-id/virtio-calws --key-file /opt/luks.key --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --batch-mode
+            sudo cryptsetup open /dev/disk/by-id/virtio-calws calws --key-file /opt/luks.key
+            sudo mkfs.ext4 -q /dev/mapper/calws
+          }
+          sudo mkdir -p $HOME/ws
+          sudo mount /dev/mapper/calws $HOME/ws
+          sudo chown $(id -u):$(id -g) $HOME/ws
       - name: Mount workspace (zvol)
         if: inputs.lane == 'postflight-warm'
         run: |
