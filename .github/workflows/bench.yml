@@ -7,7 +7,7 @@ on:
         description: runner lane
         required: true
         type: choice
-        options: [gh-hosted, postflight-4core, postflight-4threads]
+        options: [gh-hosted, postflight-4core, postflight-4threads, blacksmith]
       rep:
         description: repetition tag
         required: false
@@ -18,7 +18,7 @@ env:
   NODE_OPTIONS: --max-old-space-size=12288
 jobs:
   bench:
-    runs-on: ${{ inputs.lane == 'gh-hosted' && 'ubuntu-latest' || fromJSON(format('["self-hosted","{0}"]', inputs.lane)) }}
+    runs-on: ${{ inputs.lane == 'gh-hosted' && 'ubuntu-latest' || inputs.lane == 'blacksmith' && 'blacksmith-4vcpu-ubuntu-2404' || fromJSON(format('["self-hosted","{0}"]', inputs.lane)) }}
     timeout-minutes: 90
     steps:
       - name: Machine info
